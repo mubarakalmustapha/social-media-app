@@ -1,0 +1,6 @@
+{
+  "jwtPrivateKey": "unsecured",
+  "requiresAuth": true,
+  "db": "mongodb+srv://mubarak:UTlp1hFTiP6JCdsG@cluster0.kusgtpe.mongodb.net/",
+  "port": "8000"
+}
