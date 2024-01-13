@@ -89,7 +89,7 @@ userSchema.methods.generateAuthToken = function () {
       followers: this.followers,
       following: this.following,
     },
-    config.get("jwtPrivateKey")
+    process.env.JWT_PRIVATE_KEY
   );
 
   return token;
