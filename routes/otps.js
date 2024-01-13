@@ -1,6 +1,7 @@
 const express = require("express");
 const bcrypt = require("bcrypt");
 const router = express.Router();
+const Joi = require("joi");
 const { OTP, validate } = require("../models/otp");
 const { sendEmail } = require("../utils/sendEmail");
 const { User } = require("../models/user");
@@ -25,6 +26,54 @@ router.post("/request", async (req, res) => {
   } catch (error) {
     console.error(error);
     res.status(500).send("Internal Server Error");
+  }
+});
+
+router.post("/verify", async (req, res) => {
+  const { error, value } = schema.validate(req.body);
+
+  if (error) {
+    return res
+      .status(400)
+      .json({ success: false, message: error.details[0].message });
+  }
+
+  const { otp, email } = value;
+
+  try {
+    const matchedOtp = await OTP.findOne({ email });
+
+    if (!matchedOtp) {
+      return res.status(400).json({ success: false, message: "OTP not found" });
+    }
+
+    const { otp: code, expiresAt } = matchedOtp;
+
+    // Compare the provided OTP with the stored hashed OTP using bcrypt
+    const validOtp = await bcrypt.compare(otp, code);
+
+    if (!validOtp) {
+      return res.status(400).json({ success: false, message: "Invalid OTP" });
+    }
+
+    if (expiresAt < Date.now()) {
+      await OTP.deleteOne({ email });
+      return res.status(400).json({
+        success: false,
+        message: "Code has expired. Request a new one",
+      });
+    }
+
+    // Delete the OTP entry from the database after successful verification
+    await OTP.deleteOne({ email });
+
+    // If all validations pass, you can proceed with further actions
+    res
+      .status(200)
+      .json({ success: true, message: "OTP verified successfully" });
+  } catch (error) {
+    console.log(error);
+    res.status(500).json({ success: false, message: "Internal Server Error" });
   }
 });
 
@@ -91,5 +140,10 @@ async function hashOTP(otp) {
   const saltRounds = 10;
   return bcrypt.hash(otp, saltRounds);
 }
+
+const schema = Joi.object({
+  otp: Joi.string().required(),
+  email: Joi.string().email().required(),
+});
 
 module.exports = router;
