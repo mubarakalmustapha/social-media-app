@@ -78,6 +78,16 @@ userSchema.methods.generateAuthToken = function () {
       name: this.name,
       email: this.email,
       role: this.role,
+      profile: {
+        bio: this.profile.bio,
+        profilePicture: this.profile.profilePicture,
+        coverPhoto: this.profile.coverPhoto,
+        dateOfBirth: this.profile.dateOfBirth,
+        gender: this.profile.gender,
+      },
+      friends: this.friends,
+      followers: this.followers,
+      following: this.following,
     },
     config.get("jwtPrivateKey")
   );
