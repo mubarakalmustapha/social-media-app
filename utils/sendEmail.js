@@ -25,7 +25,6 @@ function sendEmail({ to, subject, message, generatedOTP, duration = 1 }) {
   };
 
   transporter.sendMail(mailOptions, (error, info) => {
-    console.log(mailOptions);
     if (error) {
       console.error("Error sending email:", error);
     } else {

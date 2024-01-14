@@ -1,20 +1,21 @@
 const express = require("express");
-const bcrypt = require("bcrypt");
 const router = express.Router();
 const Joi = require("joi");
-const { OTP, validate } = require("../models/otp");
-const { sendEmail } = require("../utils/sendEmail");
+const { OTP } = require("../models/otp");
+const { sendOTP } = require("../utils/sendOTP");
+const bcrypt = require("bcrypt");
 const { User } = require("../models/user");
 
+// Request OTP
 router.post("/request", async (req, res) => {
   try {
     const { email, subject, message, duration } = req.body;
 
-    const { error } = validate({ email, subject, message, duration });
+    const { error } = validateRequestOTP({ email, subject, message, duration });
     if (error) {
       return res.status(400).send(error.details[0].message);
     }
-    // Check if the email already exists in the users table
+
     const existingUser = await User.findOne({ email });
     if (!existingUser) {
       return res.status(400).send("User with this email does not exist");
@@ -29,8 +30,9 @@ router.post("/request", async (req, res) => {
   }
 });
 
+// Verify requested OTP
 router.post("/verify", async (req, res) => {
-  const { error, value } = schema.validate(req.body);
+  const { error, value } = validate(req.body);
 
   if (error) {
     return res
@@ -67,6 +69,13 @@ router.post("/verify", async (req, res) => {
     // Delete the OTP entry from the database after successful verification
     await OTP.deleteOne({ email });
 
+    // Update the user's 'verified' field to true
+    const existingUser = await User.findOne({ email });
+    if (existingUser) {
+      existingUser.verified = true;
+      await existingUser.save();
+    }
+
     // If all validations pass, you can proceed with further actions
     res
       .status(200)
@@ -77,73 +86,181 @@ router.post("/verify", async (req, res) => {
   }
 });
 
-async function sendOTP(email, subject, message, duration) {
+// Verify user account after register
+router.post("/verify-account", async (req, res) => {
+  const { error } = validate(req.body);
+  if (error) return res.status(400).send(error.details[0].message);
+
+  const { email, otp } = req.body;
+
   try {
-    if (!(email && subject && message)) {
-      return res
-        .status(400)
-        .send("Provide values for email, subject, and message");
+    const matchedOtp = await OTP.findOne({ email });
+
+    if (!matchedOtp) {
+      return res.status(400).json({ success: false, message: "OTP not found" });
     }
 
-    // Delete existing OTP for the given email
+    const { otp: code, expiresAt } = matchedOtp;
+
+    // Compare the provided OTP with the stored hashed OTP using bcrypt
+    const validOtp = await bcrypt.compare(otp, code);
+
+    if (!validOtp) {
+      return res.status(400).json({ success: false, message: "Invalid OTP" });
+    }
+
+    if (expiresAt < Date.now()) {
+      await OTP.deleteOne({ email });
+      return res.status(400).json({
+        success: false,
+        message: "Code has expired. Request a new one",
+      });
+    }
+
+    // Delete the OTP entry from the database after successful verification
     await OTP.deleteOne({ email });
 
-    // Generate OTP
-    const generatedOTP = generateOTP();
-
-    // Hash the OTP using bcrypt
-    const hashedOTP = await hashOTP(generatedOTP);
-
-    // Save the hashed OTP to the database
-    const newOTP = new OTP({
-      email,
-      otp: hashedOTP,
-      createdAt: Date.now(),
-      expiresAt: Date.now() + 3600000 * +duration,
-    });
-
-    try {
-      await newOTP.save();
-    } catch (saveError) {
-      console.error("Error saving OTP to the database:", saveError);
-      throw saveError;
+    // Update the user's 'verified' field to true
+    const existingUser = await User.findOne({ email });
+    if (existingUser) {
+      existingUser.verified = true;
+      await existingUser.save();
     }
 
-    const emailOptions = {
-      to: email,
-      subject,
-      message,
-      generatedOTP,
-      duration,
-    };
-
-    try {
-      await sendEmail(emailOptions);
-    } catch (emailError) {
-      console.error("Error sending email:", emailError);
-      throw new Error("Failed to send OTP email");
-    }
+    // If all validations pass, you can proceed with further actions
+    res
+      .status(200)
+      .json({ success: true, message: "OTP verified successfully" });
   } catch (error) {
-    throw error;
+    console.error(error);
+    res.status(500).json({ success: false, message: "Internal Server Error" });
   }
-}
-
-// Function to generate a 4-digit OTP
-function generateOTP() {
-  return Math.floor(1000 + Math.random() * 9000)
-    .toString()
-    .padStart(4, "0");
-}
-
-// Function to hash the OTP using bcrypt
-async function hashOTP(otp) {
-  const saltRounds = 10;
-  return bcrypt.hash(otp, saltRounds);
-}
-
-const schema = Joi.object({
-  otp: Joi.string().required(),
-  email: Joi.string().email().required(),
 });
+
+// Request Password Reset (Send OTP)
+router.post("/request-reset", async (req, res) => {
+  try {
+    const { email } = req.body;
+
+    // Check if the email exists in the database
+    const existingUser = await User.findOne({ email });
+
+    if (!existingUser) {
+      return res.status(404).send("User not found");
+    }
+
+    // Check if the user is verified
+    if (!existingUser.verified) {
+      return res.status(400).send("User is not verified");
+    }
+
+    // Generate and send OTP for password reset
+    await sendOTP(
+      email,
+      "Password Reset",
+      "Your OTP for password reset is:",
+      1
+    );
+
+    res.status(200).send(`Password reset OTP sent successfully to ${email}`);
+  } catch (error) {
+    console.error(error);
+    res.status(500).send("Internal Server Error");
+  }
+});
+
+// Reset Password after OTP verification
+router.post("/reset-password", async (req, res) => {
+  const { error } = validateResetPassword(req.body);
+
+  if (error) {
+    return res
+      .status(400)
+      .json({ success: false, message: error.details[0].message });
+  }
+
+  const { email, otp, newPassword } = req.body;
+
+  try {
+    // Find the matching OTP for the provided email
+    const matchedOtp = await OTP.findOne({ email });
+
+    if (!matchedOtp) {
+      return res.status(400).json({ success: false, message: "OTP not found" });
+    }
+
+    const { otp: code, expiresAt } = matchedOtp;
+
+    // Compare the provided OTP with the stored hashed OTP using bcrypt
+    const validOtp = await bcrypt.compare(otp, code);
+
+    if (!validOtp) {
+      return res.status(400).json({ success: false, message: "Invalid OTP" });
+    }
+
+    if (expiresAt < Date.now()) {
+      await OTP.deleteOne({ email });
+      return res.status(400).json({
+        success: false,
+        message: "Code has expired. Request a new one",
+      });
+    }
+
+    const existingUser = await User.findOne({ email });
+
+    if (!existingUser) {
+      return res
+        .status(404)
+        .json({ success: false, message: "User not found" });
+    }
+
+    // Hash the new password
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
+
+    // Update the user's password
+    existingUser.password = hashedPassword;
+    await existingUser.save();
+
+    // Delete the OTP entry from the database after successful password reset
+    await OTP.deleteOne({ email });
+
+    res
+      .status(200)
+      .json({ success: true, message: "Password reset successfully" });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ success: false, message: "Internal Server Error" });
+  }
+});
+
+function validateResetPassword(req) {
+  const schema = Joi.object({
+    email: Joi.string().min(4).email().max(255).required().label("Email"),
+    otp: Joi.string().required().label("OTP"),
+    newPassword: Joi.string().min(4).max(255).required().label("New Password"),
+  });
+
+  return schema.validate(req);
+}
+
+function validate(req) {
+  const schema = Joi.object({
+    email: Joi.string().min(4).email().max(255).required().label("Email"),
+    otp: Joi.string().required().label("OTP"),
+  });
+
+  return schema.validate(req);
+}
+
+function validateRequestOTP(req) {
+  const schema = Joi.object({
+    email: Joi.string().min(4).email().max(255).required().label("Email"),
+    subject: Joi.string().min(1).max(255).required().label("Subject"),
+    message: Joi.string().min(1).max(255).required().label("Message"),
+    duration: Joi.string().min(1).max(255).required().label("Duration"),
+  });
+
+  return schema.validate(req);
+}
 
 module.exports = router;
