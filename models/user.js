@@ -46,6 +46,19 @@ const userSchema = new mongoose.Schema({
       enum: ["Male", "Female", "Other"],
     },
   },
+  friendRequests: [
+    {
+      user: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "User",
+      },
+      status: {
+        type: String,
+        enum: ["pending", "accepted", "rejected"],
+        default: "pending",
+      },
+    },
+  ],
   friends: [
     {
       type: mongoose.Schema.Types.ObjectId,
@@ -92,7 +105,8 @@ userSchema.methods.generateAuthToken = function () {
       followers: this.followers,
       following: this.following,
     },
-    process.env.JWT_PRIVATE_KEY
+    process.env.JWT_PRIVATE_KEY,
+    { expiresIn: "1d" }
   );
 
   return token;
@@ -109,7 +123,7 @@ function validateUser(user) {
     bio: Joi.string().max(200).label("Bio"),
     profilePicture: Joi.string().label("Profile Picture"),
     coverPhoto: Joi.string().label("Cover Photo"),
-    dateOfBirth: Joi.date().label("Date of Birth"),
+    dateOfBirth: Joi.date().max("now").label("Date of Birth"),
     gender: Joi.string().valid("Male", "Female", "Other").label("Gender"),
     friends: Joi.array().items(Joi.objectId()).label("Friends"),
     followers: Joi.array().items(Joi.objectId()).label("Followers"),
@@ -119,4 +133,19 @@ function validateUser(user) {
   return schema.validate(user);
 }
 
-module.exports = { User, validate: validateUser };
+function validateUpdateUser(user) {
+  const schema = Joi.object({
+    name: Joi.string().min(4).max(50).label("Name"),
+    profile: Joi.object({
+      profilePicture: Joi.string().label("Profile Picture"),
+      coverPhoto: Joi.string().label("Cover Photo"),
+      dateOfBirth: Joi.date().max("now").label("Date of Birth"),
+      gender: Joi.string().valid("Male", "Female", "Other").label("Gender"),
+      bio: Joi.string().max(200).label("Bio"),
+    }),
+  }).min(1); // Require at least one field to be present
+
+  return schema.validate(user);
+}
+
+module.exports = { User, validate: validateUser, validateUpdateUser };

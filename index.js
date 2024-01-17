@@ -16,7 +16,7 @@ require("./startup/logging")();
 require("./startup/routes")(app);
 
 const server = http.createServer(app);
-const io = socketIOSetup(server);
+socketIOSetup(server);
 
 const port = process.env.PORT || config.get("port");
 server.listen(port, () => console.log(`Listening on port ${port}...`));

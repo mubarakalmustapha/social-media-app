@@ -7,4 +7,9 @@ module.exports = function (app) {
   app.use("/api/signup", users);
   app.use("/api/signin", auth);
   app.use("/api/otp", otps);
+
+  app.use("/api/users", users);
+  app.use("/api/users", users);
+  app.use("/api/users", users);
+  app.use("/api/users", users);
 };
