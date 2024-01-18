@@ -4,7 +4,7 @@ const express = require("express");
 const bodyParser = require("body-parser");
 const cors = require("cors");
 const http = require("http");
-const socketIOSetup = require("./startup/socket");
+const socketIOSetup = require("./routes/chats");
 
 const app = express();
 app.use(cors({ origin: "*" }));
